@@ -38,7 +38,7 @@ class halfplane:
                                        
         if plunge_azimuth is None:
             plunge_azimuth = (strike + 180) % 360
-        # Get the y' axis that is along the line of the halfplane
+        # Get the z' axis that is along the edge that defines the halfplane
         self.plunge_vector = self._project_plane(plunge_azimuth)
         print(f"Plunge Line Vector: {self.plunge_vector}")
         if self.plunge_vector[2] > 0:
@@ -48,7 +48,7 @@ class halfplane:
             self.normal *= -1
             
         # Debug Plots
-        self.fig = plt.figure()
+        self.fig = plt.figure('Edwards 1983')
         self.ax = self.fig.add_subplot(111, projection='3d')
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
@@ -332,11 +332,11 @@ myhalfplane = Edwards1983_BField(strike=280,
                         electrode_point=loc_electrode)
 
 
-myhalfplane.debug_MPL_plot_plane()
-x = np.linspace(-10, 10, num=5)
-y = np.linspace(-10, 10, num=5)
-z = np.linspace(0, -20, num=5)
-xx, yy, zz = np.meshgrid(x, y, z)
-myhalfplane.plot_field(xx, yy, zz, -4)
+#myhalfplane.debug_MPL_plot_plane()
+#x = np.linspace(-10, 10, num=5)
+#y = np.linspace(-10, 10, num=5)
+#z = np.linspace(0, -20, num=5)
+#xx, yy, zz = np.meshgrid(x, y, z)
+#myhalfplane.plot_field(xx, yy, zz, -4)
 
 plt.show()

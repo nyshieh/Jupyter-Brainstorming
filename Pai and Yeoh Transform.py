@@ -5,21 +5,33 @@ Created on Thu Dec 17 13:36:10 2020
 @author: Norm
 """
 from mpl_toolkits.mplot3d import Axes3D
-
+from Edwards1983Transform import Edwards1983_BField as Edwards1983Field
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from scipy.integrate import simps
 
 class halfplane:
-    def __init__(self, strike, dip, electrode_point, plunge_azimuth=None):
+    def __init__(self, strike, dip, electrode_point, line_point, plunge_azimuth=None):
         """
         strike: Strike of the half plane in degrees
         dip: Dip of the half plane in  degrees
         electrode_point: Point on the plane that will be used to define the origin
                          where the current is injected
+        line_point: Point that defines the line that defines the halfspace
         plunge_azimuth: Azimuth in degrees of the edge of the halfplane. Our y axis will align
                         with this edge
         """
+        # The Edwards 1983 Plane is required for calculating the integral
+        # over the plate for cases where electrode is touching the plane
+        #self.edwardsPlane = Edwards1983Field(strike, 
+                                             #dip, 
+                                             #electrode_point, 
+                                             #plunge_azimuth)
+        # Debug Plots
+        self.fig = plt.figure('Pai and Yeoh')
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.ax.set_xlabel('X'), self.ax.set_ylabel('Y'), self.ax.set_zlabel('Z')
         
         rad_strike = np.pi * strike / 180
         rad_dip = np.pi * dip / 180
@@ -30,14 +42,10 @@ class halfplane:
         self.normal = self.fnormal(strike, dip)
         self.electrode_point = electrode_point
         
-        # Calculate origin
-        # Project to plane:
-        self._project_plane()
-        
         # Get plane offset
         # Form: ax + by + cz = d
-        self.d = np.dot(self.normal, electrode_point)
-                                       
+        self.d = np.dot(self.normal, line_point)
+        
         if plunge_azimuth is None:
             plunge_azimuth = (strike + 180) % 360
         # Get the y' axis that is along the line of the halfplane
@@ -48,20 +56,35 @@ class halfplane:
         if self.normal[2] < 0:
             self.normal *= -1
             
-        # Debug Plots
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111, projection='3d')
-        self.ax.set_xlabel('X'), self.ax.set_ylabel('Y'), self.ax.set_zlabel('Z')
-        
         self.basis = np.identity(3)
         self.ax.quiver(0,0,0, self.plunge_vector[0], self.plunge_vector[1], self.plunge_vector[2])
+        
+        # Calculate the line that goes through line_point and the plane that goes
+        # through the electrode and the line
+        self._calculate_origin(line_point)
         self._calculate_rotation()
-        # Defines the rotation to the frame of reference used for all the math
-        # Note that this frame of reference is different from the one in Pai and
-        # Yeoh 1993
-        # 1.) Rotate y axis about z to the plunge vector projected onto x-y
-        # 2.) Rotate y' axis about x' axis to the plunge vector
-        # 3.) Rotate about y'' such that the Z vector lies on the plane
+        
+    def _calculate_origin(self, line_pt):
+        """
+        Calculate the origin point given one point that defines the line
+
+        Parameters
+        ----------
+        line_pt : ndarray
+            A point on the line that defines the line of the halfplane
+
+        Returns
+        -------
+        None.
+        Adds a parameter to self.origin
+
+        """
+        
+        AP = self.electrode_point - line_pt
+        AB = self.plunge_vector
+        self.origin = line_pt + np.dot(AP, AB) / np.dot(AB, AB) * AB
+        print(f"Origin point: {self.origin}")
+        self.ax.scatter(self.origin[0], self.origin[1], self.origin[2], color='red') 
     
     def _project_plane(self, azimuth):
         """
@@ -93,15 +116,33 @@ class halfplane:
     def _calculate_rotation(self):
         """
         Return the scipy rotation to rotate to the coordinate frame
-
+        IN PROGRESS
+        
         Returns
         -------
-        None
+        scipy.spatial.transform.Rotation instance
 
         """
         
-         
+        # Calculate the angle
+        rot1 = self._angle_2V(self.plunge_vector[0:2], [0,1])
         
+        if self.plunge_vector[0] < 0:
+            rot1 *= -1
+        # 1.) Rotate Z Axis down to the plane 
+        rotation = R.from_euler('xz', [np.pi/2, rot1])
+        
+        xhat = np.array([1,0,0])
+        xhat_rot = rotation.apply(xhat)
+        azimuth = 180 / np.pi * np.atan2(xhat_rot[0], )
+        
+        rot3 = self._angle_2V(self.plunge_vector, test_z)
+        print(f"Rotation to plunge: {rot3 * 180 / np.pi}")
+        rotation = R.from_euler('xz', [np.pi/2, rot1])
+        
+        self.basis = rotation.apply(self.basis)
+        
+         
     def debug_MPL_plot_plane(self):
         """
         Plots the plane and the basis vectors on the matplotlib axis in ax3d
@@ -117,12 +158,12 @@ class halfplane:
 
         """
         const_offset = 1
-        x = np.linspace(self.electrode_point[0] - const_offset, 
-                        self.electrode_point + const_offset,
-                        num=5)
-        y = np.linspace(self.electrode_point[1] - const_offset, 
-                        self.electrode_point + const_offset,
-                        num=5)
+        x = np.linspace(self.origin[0] - const_offset, 
+                        self.origin + const_offset,
+                        num=4)
+        y = np.linspace(self.origin[1] - const_offset, 
+                        self.origin + const_offset,
+                        num=4)
         
         # Plot the plane in the area around the electrode
         xx, yy = np.meshgrid(x, y)
@@ -130,11 +171,14 @@ class halfplane:
         
         self.ax.scatter(xx, yy, zz)
         
-        x, y, z = self.electrode_point
+        #x, y, z = self.electrode_point
         # Plot the basis vectors
-        self.ax.quiver(x, y, z, self.basis[0][0], self.basis[0][1], self.basis[0][2], color='red')
-        self.ax.quiver(x, y, z, self.basis[1][0], self.basis[1][1], self.basis[1][2], color='green')
-        self.ax.quiver(x, y, z, self.basis[2][0], self.basis[2][1], self.basis[2][2], color='blue')
+        self.ax.quiver(self.origin[0], self.origin[1], self.origin[2], 
+                       self.basis[0][0], self.basis[0][1], self.basis[0][2], color='red')
+        self.ax.quiver(self.origin[0], self.origin[1], self.origin[2], 
+                       self.basis[1][0], self.basis[1][1], self.basis[1][2], color='green')
+        self.ax.quiver(self.origin[0], self.origin[1], self.origin[2], 
+                       self.basis[2][0], self.basis[2][1], self.basis[2][2], color='blue')
         #self.ax.quiver(x, y, z, self.normal[0], self.normal[1], self.normal[2]) 
         
     @staticmethod
@@ -208,10 +252,82 @@ class halfplane:
         Rotated Vector
         """
         return self.rotation.apply(vect, inverse=invert_rot)
+    
+    def mag_field_onplate(self, X, Y, Z):
+        """
+        X, Y, Z: Global coordinates to evaluate the BField at
+        Resultant BField due to current flow in the half-plane plate from 
+        an electrode that is in contact with the plate
+        """
+        # All coordinates that are used in this function need to be transformed into the local coordinates for the 
+        # computations required
+        u0 = 1.25663706e-6
+        
+        # We have to transform the input coordinates into the local coordinate system
+        
+        x0 = self.src_x0 = 0
+        z0 = self.src_z0 = 0
+    
+        def Bx():
+            t = np.linspace(0, np.pi / 2, num=200)
+            frac_bot1 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) - (Z - z0) * np.sin(t), 2)
+            frac_bot2 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) + (Z - z0) * np.sin(t), 2)
+            frac_top = np.abs(Y) + x0 * np.sin(t)
+            y = np.cos(t) * (frac_top / frac_bot1 - frac_top / frac_bot2)
+            area = simps(y, t)
+            return area * np.sign(y) * -1 * u0 / 4 / np.pi ^ 2
+        
+        def Bz():
+            t = np.linspace(0, np.pi / 2, num=200)
+            frac_bot1 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) - (Z - z0) * np.sin(t), 2)
+            frac_bot2 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) + (Z - z0) * np.sin(t), 2)
+            frac_top = np.abs(Y) + x0 * np.sin(t)
+            y = np.sin(t) * (frac_top / frac_bot1 + frac_top / frac_bot2)
+            area = simps(y, t)
+            return area * np.sign(Y) * u0 / 4 / np.pi ^ 2
+        
+        def By():
+            t = np.linspace(0, np.pi / 2, num=200)
+            
+            frac_top1 = X * np.cos(t) - (Z - z0) * np.sin(t)
+            frac_top2 = X * np.cos(t) + (Z - z0) * np.sin(t)
+            frac_bot1 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) - (Z - z0) * np.sin(t), 2)
+            frac_bot2 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
+                        np.power(X * np.cos(t) + (Z - z0) * np.sin(t), 2)
+            
+            y = frac_top1 / frac_bot1 - frac_top2 / frac_bot2
+            area = simps(y, t)
+            return area * u0 / 4 / np.pi ^ 2
+    
+        # We need to inverse transform this vector back into global coordinates 
+        # **ROTATION ONLY, no translation
+        unrotated_vector = np.array([Bx, By, Bz])
+        
+        return unrotated_vector
 
-loc_electrode = np.array([0,0,0])
+loc_electrode = np.array([0, 1, -1])
+loc_line_pt = np.array([1,0,0])
+myhalfplane = halfplane(strike=90, dip=50, 
+                        electrode_point=loc_electrode,
+                        line_point=loc_line_pt
+                        )
 
-myhalfplane = halfplane(strike=280, 
-                        dip=75, 
-                        electrode_point=loc_electrode)
+myhalfplane.ax.scatter(loc_electrode[0], 
+                       loc_electrode[1], 
+                       loc_electrode[2], color='black')
+
+myhalfplane.ax.scatter(loc_line_pt[0], 
+                       loc_line_pt[1], 
+                       loc_line_pt[2], color='green')
+myhalfplane.debug_MPL_plot_plane()
 plt.show()
+
+
+
+
+
