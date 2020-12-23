@@ -24,10 +24,10 @@ class halfplane:
         """
         # The Edwards 1983 Plane is required for calculating the integral
         # over the plate for cases where electrode is touching the plane
-        #self.edwardsPlane = Edwards1983Field(strike, 
-                                             #dip, 
-                                             #electrode_point, 
-                                             #plunge_azimuth)
+        self.edwardsPlane = Edwards1983Field(strike, 
+                                             dip, 
+                                             electrode_point, 
+                                             plunge_azimuth)
         # Debug Plots
         self.fig = plt.figure('Pai and Yeoh')
         self.ax = self.fig.add_subplot(111, projection='3d')
@@ -48,6 +48,7 @@ class halfplane:
         
         if plunge_azimuth is None:
             plunge_azimuth = (strike + 180) % 360
+            
         # Get the y' axis that is along the line of the halfplane
         self.plunge_vector = self._project_plane(plunge_azimuth)
         print(f"Plunge Line Vector: {self.plunge_vector}")
@@ -125,21 +126,30 @@ class halfplane:
         """
         
         # Calculate the angle
-        rot1 = self._angle_2V(self.plunge_vector[0:2], [0,1])
+        rot1 = self._angle_2V(self.plunge_vector[0:2], [0,-1])
         
+        print(f"Rotation around to plunge: {rot1 * 180 / np.pi}")
         if self.plunge_vector[0] < 0:
             rot1 *= -1
-        # 1.) Rotate Z Axis down to the plane 
-        rotation = R.from_euler('xz', [np.pi/2, rot1])
+            
+        # 1.) Rotate Z Axis down to the xy plane 
+        rotation = R.from_euler('XY', [np.pi/2, rot1])
         
+        # Calculate the rotation down to the plane specified in the class
         xhat = np.array([1,0,0])
         xhat_rot = rotation.apply(xhat)
-        azimuth = 180 / np.pi * np.atan2(xhat_rot[0], )
+        a = np.arctan2(xhat_rot[0], xhat_rot[1])
         
-        rot3 = self._angle_2V(self.plunge_vector, test_z)
-        print(f"Rotation to plunge: {rot3 * 180 / np.pi}")
-        rotation = R.from_euler('xz', [np.pi/2, rot1])
+        if a < 0: a += np.pi * 2
         
+        azimuth = 180 / np.pi * a
+        print(f"{xhat_rot}")
+        print(f"Calculated rotated plunge vector azimuth {azimuth}")
+        rot3 = self._angle_2V(self._project_plane(azimuth), xhat_rot)
+        print(f"Rotation down to plunge: {rot3 * 180 / np.pi}")
+        rotation = R.from_euler('XYZ', [np.pi/2, rot1, -rot3])
+        
+        self.rotation = rotation
         self.basis = rotation.apply(self.basis)
         
          
@@ -187,7 +197,7 @@ class halfplane:
         if abs(a - 1) < 1e-9:
             return 0
         elif abs(a + 1) < 1e-9:
-            return np.pi()
+            return np.pi
         else:
             return np.arccos(a)
         
@@ -253,21 +263,34 @@ class halfplane:
         """
         return self.rotation.apply(vect, inverse=invert_rot)
     
-    def mag_field_onplate(self, X, Y, Z):
+    def mag_field_onplate(self, X, Y, Z, tx_current):
         """
-        X, Y, Z: Global coordinates to evaluate the BField at
-        Resultant BField due to current flow in the half-plane plate from 
-        an electrode that is in contact with the plate
+        Calculate the BField of a halfplane given an electrode that resides on the plane
+
+        Parameters
+        ----------
+        X : Global X Coordinate
+        
+        Y : Global Y Coordinate
+        
+        Z : Global Z Coordinate
+
+
+        Returns
+        -------
+        float, float, float
+            Calculated BField in Global Coordinates
+
         """
         # All coordinates that are used in this function need to be transformed into the local coordinates for the 
         # computations required
         u0 = 1.25663706e-6
         
         # We have to transform the input coordinates into the local coordinate system
+        electrode_coord_local = self.rotate(self.electrode_point - self.origin)
+        x0 = electrode_coord_local[0]
+        z0 = electrode_coord_local[2]
         
-        x0 = self.src_x0 = 0
-        z0 = self.src_z0 = 0
-    
         def Bx():
             t = np.linspace(0, np.pi / 2, num=200)
             frac_bot1 = np.power(np.abs(Y) + x0 * np.sin(t), 2) + \
@@ -277,7 +300,7 @@ class halfplane:
             frac_top = np.abs(Y) + x0 * np.sin(t)
             y = np.cos(t) * (frac_top / frac_bot1 - frac_top / frac_bot2)
             area = simps(y, t)
-            return area * np.sign(y) * -1 * u0 / 4 / np.pi ^ 2
+            return area * np.sign(Y) * -1 * u0 / 4 / np.pi ** 2
         
         def Bz():
             t = np.linspace(0, np.pi / 2, num=200)
@@ -288,7 +311,7 @@ class halfplane:
             frac_top = np.abs(Y) + x0 * np.sin(t)
             y = np.sin(t) * (frac_top / frac_bot1 + frac_top / frac_bot2)
             area = simps(y, t)
-            return area * np.sign(Y) * u0 / 4 / np.pi ^ 2
+            return area * np.sign(Y) * u0 / 4 / np.pi ** 2
         
         def By():
             t = np.linspace(0, np.pi / 2, num=200)
@@ -302,16 +325,108 @@ class halfplane:
             
             y = frac_top1 / frac_bot1 - frac_top2 / frac_bot2
             area = simps(y, t)
-            return area * u0 / 4 / np.pi ^ 2
+            return area * u0 / 4 / np.pi ** 2
     
-        # We need to inverse transform this vector back into global coordinates 
-        # **ROTATION ONLY, no translation
-        unrotated_vector = np.array([Bx, By, Bz])
-        
-        return unrotated_vector
+        global_field = self.rotate(np.array([Bx(), By(), Bz()]) * tx_current, 
+                                   invert_rot=True)
+        final_vect = global_field + self.edwardsPlane.BField(X, Y, Z, tx_current)
+            
+        return final_vect[0], final_vect[1], final_vect[2]
+    
+    def plot_field(self, xx, yy, zz, tx_current):
+        """
+        Plot the field on the internal class matplotlib plot
 
-loc_electrode = np.array([0, 1, -1])
-loc_line_pt = np.array([1,0,0])
+        Parameters
+        ----------
+        xx : ndarray
+            X coordinates to evaluate at
+        yy : ndarray
+            Y coordinates to evaluate at
+        zz : ndarray
+            Z coordinates to evaluate at
+        tx_current : float
+            Transmitter current in amps
+
+        Returns
+        -------
+        None.
+
+        """
+        vField = np.vectorize(self.mag_field_onplate, excluded=[3])
+        
+        fieldx, fieldy, fieldz = vField(xx, yy, zz, tx_current)
+        
+        self.ax.quiver(xx, yy, zz, fieldx, fieldy, fieldz, normalize=True, length=1, color='red')
+    
+    def current_sink(self, X, Y, Z):
+        """
+        Calculate the current sink given a point X, Y, Z that lies within 
+        the halfspace specified in the class
+
+        Parameters
+        ----------
+        X : TYPE
+            DESCRIPTION.
+        Y : TYPE
+            DESCRIPTION.
+        Z : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        pt = np.array([X,Y,Z])
+        # Make sure that the provided point is in the halfplane
+        assert self.in_space(pt)
+        
+        electrode_coord_local = self.rotate(self.electrode_point - self.origin)
+        eval_coord_local = self.rotate(pt - self.origin)
+        x0 = eval_coord_local[0]
+        z0 = eval_coord_local[2]
+        
+        # Source electrode cylindrical position
+        r = np.linalg.norm(eval_coord_local)
+        r_s = np.linalg.norm(electrode_coord_local)
+        
+        # Absolute distance between electrode and evaluation point
+        R = np.linalg.norm(electrode_coord_local - eval_coord_local)
+        if r_s < 1e-8:
+            alpha_s = 0  
+        else: 
+            alpha_s = self._angle_2V(electrode_coord_local, 
+                                     np.array([1,0,0]))
+            if electrode_coord_local[1] < 0: alpha_s = 360 - alpha_s 
+                
+        if r < 1e-8:
+            alpha = 0  
+        else: 
+            alpha = self._angle_2V(eval_coord_local, 
+                                   np.array([1,0,0]))
+            if eval_coord_local[1] < 0: alpha = 360 - alpha 
+        
+        
+        v1 = 2 * np.sqrt(x0 * r_s) * np.cos(alpha_s / 2)
+        c = np.sqrt(R ** 2 + z0 ** 2)
+        s1 = np.pi ** -2 * ((x0 + r_s) ** 2 + z0 ** 2) ** -1 * \
+             np.sqrt(r_s / x0) * np.sin(alpha_s / 2)
+        s2 = r_s * np.sin(alpha_s) * np.pi ** -2 * (v1 / c ** 2 / (c ** 2 + v1 ** 2) + \
+                                                    np.arctan(v1 / c) / c ** 3)
+        return s1, s2
+       
+
+borehole_stations = np.array([[-10, -10,   0],
+                              [-10, -10, -10],
+                              [-10, -10, -20],
+                              [-10, -10, -30],
+                              [-10, -10, -40],
+                              [-10, -10, -50]]
+                              )    
+loc_electrode = np.array([0, 0, -10])
+loc_line_pt = np.array([1,0,-5])
 myhalfplane = halfplane(strike=90, dip=50, 
                         electrode_point=loc_electrode,
                         line_point=loc_line_pt
@@ -325,6 +440,13 @@ myhalfplane.ax.scatter(loc_line_pt[0],
                        loc_line_pt[1], 
                        loc_line_pt[2], color='green')
 myhalfplane.debug_MPL_plot_plane()
+
+xx, yy, zz = np.meshgrid(np.linspace(-10,10,num=6), 
+                         np.linspace(-10,10,num=6), 
+                         np.linspace(-10,10,num=6))
+
+
+myhalfplane.plot_field(xx, yy, zz, 1)
 plt.show()
 
 

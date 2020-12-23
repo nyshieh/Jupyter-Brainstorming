@@ -64,7 +64,8 @@ class halfplane:
         # 2.) Rotate y' axis about x' axis to the plunge vector
         # 3.) Rotate about y'' such that the Z vector lies on the plane
         
-        
+        # DEBUG
+        self.debug_MPL_plot_plane()
     def _calculate_rotation(self, Edwards1983=True):
         """
         Return the scipy rotation to rotate to the coordinate frame
@@ -121,19 +122,19 @@ class halfplane:
         None.
 
         """
-        const_offset = 1
+        const_offset = 2
         x = np.linspace(self.electrode_point[0] - const_offset, 
                         self.electrode_point + const_offset,
-                        num=5)
+                        num=4)
         y = np.linspace(self.electrode_point[1] - const_offset, 
                         self.electrode_point + const_offset,
-                        num=5)
+                        num=4)
         
         # Plot the plane in the area around the electrode
         xx, yy = np.meshgrid(x, y)
         zz = self.z_plane(xx, yy)
         
-        #self.ax.scatter(xx, yy, zz)
+        self.ax.scatter(xx, yy, zz)
         
         x, y, z = self.electrode_point
         # Plot the basis vectors
@@ -252,14 +253,25 @@ class Edwards1983_BField(halfplane):
 
         Parameters
         ----------
-        pos_vect : ndarray
-            Position of the point to evaluate the field
+        pos_x : float
+            Global X Coordinate of point to evaluate
+        pos_y : float
+            Global Y Coordinate of point to evaluate
+        pos_z : float
+            Global Z Coordinate of point to evaluate
+        tx_current : TYPE
+            Transmitter current
 
         Returns
         -------
-        ndarray
-        BField calculated at pos_vect in Tesla
+        float
+            X Coordinate or 
+        float
+            Global X Coordinate of point to evaluate
+        float
+
         """
+        
         u0 = 1.25663706e-6
         pos_vect = np.array([pos_x, pos_y, pos_z])
         normalized_pos = pos_vect - self.electrode_point
@@ -272,9 +284,8 @@ class Edwards1983_BField(halfplane):
         r = np.sqrt(w ** 2 + y ** 2)
         v = x * np.sin(self.rad_dip) - z * np.cos(self.rad_dip)
         R = np.sqrt(r ** 2 + v ** 2)
-        if w/y == np.nan:
-            breakpoint('Whats going on')
-        print(w/y)
+        if w/y == np.nan: breakpoint('Whats going on with this arctan??')
+        
             
         phi = np.arctan(w/y)
         sgnV = np.sign(v)
@@ -292,9 +303,9 @@ class Edwards1983_BField(halfplane):
         B_zLocal = B_a * np.sin(self.rad_dip) - B_v * np.cos(self.rad_dip)
         
         local_B_Field = np.array([B_xLocal, 0, B_zLocal])
-        rot_Field = self.rotate(local_B_Field, invert_rot=True)
-        print(rot_Field)
-        return rot_Field[0], rot_Field[1], rot_Field[2]
+        global_field = self.rotate(local_B_Field, invert_rot=True)
+
+        return global_field[0], global_field[1], global_field[2]
     
     def plot_field(self, xx, yy, zz, tx_current):
         """
@@ -323,13 +334,13 @@ class Edwards1983_BField(halfplane):
         self.ax.quiver(xx, yy, zz, fieldx, fieldy, fieldz, normalize=True)
         
     
-BH_AZIMUTH = 50
+#BH_AZIMUTH = 50
 
-loc_electrode = np.array([0,0,0])
+#loc_electrode = np.array([0,0,0])
 
-myhalfplane = Edwards1983_BField(strike=280, 
-                        dip=45, 
-                        electrode_point=loc_electrode)
+#myhalfplane = Edwards1983_BField(strike=280, 
+                        #dip=45, 
+                        #electrode_point=loc_electrode)
 
 
 #myhalfplane.debug_MPL_plot_plane()
