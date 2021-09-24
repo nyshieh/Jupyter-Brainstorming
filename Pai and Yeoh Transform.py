@@ -381,13 +381,15 @@ class halfplane:
         
         pt = np.array([X,Y,Z])
         # Make sure that the provided point is in the halfplane
-        assert self.in_space(pt)
+        # assert self.in_space(pt)
         
         electrode_coord_local = self.rotate(self.electrode_point - self.origin)
         eval_coord_local = self.rotate(pt - self.origin)
+        
         x0 = eval_coord_local[0]
         z0 = eval_coord_local[2]
-        
+        if x0 < 0:
+            print("Point not in plane")
         # Source electrode cylindrical position
         r = np.linalg.norm(eval_coord_local)
         r_s = np.linalg.norm(electrode_coord_local)
@@ -445,8 +447,8 @@ xx, yy, zz = np.meshgrid(np.linspace(-10,10,num=6),
                          np.linspace(-10,10,num=6), 
                          np.linspace(-10,10,num=6))
 
-
-myhalfplane.plot_field(xx, yy, zz, 1)
+myhalfplane.plot_field(xx, yy, zz, 2)
+#myhalfplane.current_sink(0, -2, -2)
 plt.show()
 
 
